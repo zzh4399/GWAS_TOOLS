@@ -1,0 +1,311 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Sep 14 15:27:49 2022
+
+@author: Zhihao Zuo
+"""
+
+# Import dependency packages
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import re
+
+
+# Mapping manhattan
+def Manhattan_plot(file, file_out=None, colors=None, size=None, threshold=None,
+                   marker_size=None, save=True, anno=None, sig_file=None, 
+                   cl_sig=None, cl_sig_file=None, cl_sel=None):
+    """
+    This is a Manhattan plot program, you can set the following parameters to 
+    improve the graph:
+    Parameters:
+    ----------
+    file:The result file of GWAS.
+    file_out:The location where the image is exported.
+    colors:The colors of each chromosome.
+    size:The size of the figure.
+    threshold:The threshold of marked significant sites was used by default 
+    using the Bonferroni algorithm.
+    marker_size:Setting the size of the markers.
+    save: Whether to save the picture, the default is True.
+    anno: Find the site of interest, and mark this site.
+    sig_file: Specially shown areas.
+    cl_sig: Color of the specially areas.
+    ---------
+    """
+    file_result = pd.read_table(file,encoding="gbk")
+    file_result = file_result.dropna(subset=["p"])
+    file_result = file_result[file_result["p"]!=0]
+    name = pd.unique(file_result["Trait"])
+    # Adjusting the color of chromosome
+    if colors == None:
+        re_color = sns.color_palette("Paired") 
+    else:
+        re_color = colors
+    plt.rcParams['font.family'] = 'Times New Roman'
+    result_mapping = []
+    for j in name:
+        l = file_result[file_result["Trait"] == j]
+        chrnum = pd.unique(l["Chr"])
+        # Setting the size of figure
+        if size == None:
+            fig,ax = plt.subplots(figsize=(14, 5))
+        else:
+            fig,ax = plt.subplots(size) 
+        if threshold == None:
+            yuzhi = -np.log10(1/len(l))
+        else:
+            yuzhi = threshold
+        chrom_spacing = 2500000
+        starting_pos = 0
+        ticks = []
+        available_chrom = []
+        pad = 0.4
+        pos_rec = {}
+        #Mapping the picture
+        for i,ch in enumerate(chrnum,start=1):
+            pos_rec[ch] = pos_rec.get(ch, starting_pos)
+            available_chrom.append(i)
+            file = l[l["Chr"] == i]
+            x_a = file["Pos"]
+            y_a = -np.log10(file["p"]) 
+            sig = file[-np.log10(file["p"]) > yuzhi]
+            x_sig = sig["Pos"]
+            y_sig = -np.log10(sig["p"])
+            max_pos = max(x_a)
+            xmin = starting_pos - (chrom_spacing / 2)
+            xmax = max_pos + starting_pos + (chrom_spacing / 2)
+            if i % 2 == 1:
+                ax.axvspan(xmin=xmin, xmax=xmax, color="white")
+            ticks.append((xmin + xmax) / 2)
+            if marker_size == None:
+                mss = 2
+                ax.plot(x_a + starting_pos, y_a,marker="o",lw=0,
+                        color=re_color[i-1], ms=mss)
+            else:
+                mss = marker_size
+                ax.plot(x_a + starting_pos, y_a,marker="o",lw=0,
+                        color=re_color[i-1], ms=mss)
+            ax.axhline(y=yuzhi, color="#C90000", ls="--", lw=1)
+            #The salient point size above the threshold line was adjusted
+            if cl_sig == None:
+                ax.plot(x_sig + starting_pos, y_sig,marker="o",lw=0,
+                        color=re_color[i-1],ms=mss+1) 
+            else:
+                ax.plot(x_sig + starting_pos, y_sig,marker="o",lw=0,
+                        color=cl_sig,ms=mss+1)
+            starting_pos = max_pos + starting_pos + chrom_spacing
+        ymax = max(-np.log10(l["p"]))
+        ax.set_ylim(0-pad,ymax+pad)
+        ax.set_xlim(0-chrom_spacing,starting_pos + chrom_spacing)
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(available_chrom)
+        for tick in ax.yaxis.get_major_ticks():
+            tick.label.set_fontsize(25)
+        for tick in ax.xaxis.get_major_ticks():
+            tick.label.set_fontsize(25)
+        ax.set_xlabel("Chromosome",fontsize=40)
+        ax.set_ylabel(r'$-\log_{10}$ ($p$ value)',fontsize=30)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_title(j, fontsize=24)
+        if anno != None:
+            file_anno = pd.read_table(anno)
+            for ro_name, ro in file_anno.iterrows():
+                chr_s = ro["Chr"]
+                file_pos = ro["Pos"]
+                file_result_se = file_result[(file_result["Chr"] == chr_s) 
+                                             & (file_result["Pos"] == file_pos)]
+                start_pos = pos_rec[chr_s]
+                label = ro["name"]
+                annot = ax.annotate(
+                        label,
+                        xy=(file_pos + start_pos, -np.log10(file_result_se["p"])),
+                        xycoords="data",
+                        size=10,
+                        xytext=(file_pos + start_pos, -np.log10(file_result_se["p"])+0.01),
+                        va="center",
+                        bbox=dict(boxstyle="round", fc="white", ec="black"),
+                        textcoords="data",
+                        arrowprops=dict(arrowstyle="->", shrinkA=6, shrinkB=5),
+                    )
+        if cl_sig_file != None:
+            file_sig = pd.read_table(cl_sig_file)
+            for ro_name, ro in file_sig.iterrows():
+                chr_s = ro["Chr"]
+                start = ro["start"]
+                end = ro["end"]
+                file_result_se = file_result[(file_result["Chr"] == chr_s) 
+                                             & (file_result["Pos"] > start)] 
+                file_result_se = file_result_se[file_result_se["Pos"] < end]
+                start_pos = pos_rec[chr_s]
+                file_pos = file_result_se["Pos"]
+                if cl_sel == None:
+                    ax.plot(file_pos + start_pos, -np.log10(file_result_se["p"]), 
+                            marker="o",lw=0, color="red", ms=3)
+                else:
+                    ax.plot(file_pos + start_pos, -np.log10(file_result_se["p"]), 
+                            marker="o",lw=0, color=cl_sel, ms=3)           
+        #Saving the figure
+        if save:
+            fig.savefig("%s/manha_%s.pdf" % (file_out, j),
+                        format="pdf", dpi=300)
+            fig.savefig("%s/manha_%s.png" % (file_out, j),
+                        format="png", dpi=120)
+        result_mapping.append([fig, ax])
+    return result_mapping
+
+
+# Plot Manhattan for the specified area
+def Manhattan_plot_small(file, chrs, start, end, save=True, file_out=None):
+    file_result = pd.read_table(file,encoding="gbk")
+    file_result = file_result.dropna(subset=["p"])
+    file_result = file_result[file_result["p"]!=0]
+    name = pd.unique(file_result["Trait"])
+    file_se1 = file_result[file_result["Chr"] == chrs]
+    file_se2 = file_se1[(file_se1["Pos"] > start) & (file_se1["Pos"] < end)]
+    result_mapping = []
+    for j in name:
+        l = file_se2[file_se2["Trait"] == j]
+        fig,ax = plt.subplots(figsize=(9, 6))
+        ax.plot(l["Pos"], -np.log10(l["p"]),marker="o",lw=0, ms=5)
+        if save:
+                fig.savefig("%s/manha_%s.pdf" % (file_out, j),
+                            format="pdf", dpi=300)
+                fig.savefig("%s/manha_%s.pdf" % (file_out, j),
+                            format="png", dpi=120)
+        result_mapping.append([fig, ax])
+    return result_mapping
+    
+    
+# Drowing the Q-Q plot
+def qq_plot(file, file_out=None, cl_line=None, cl_marker=None, save=True):
+    """
+    The results of GWAs were evaluated by plotting Q-Q.
+    Parameters:
+    ----------
+    file:The result file of GWAS. 
+    file_out:The location where the image is exported.
+    cl_line:The colors of line.
+    cl_marker:The size of marker.
+    save: Whether to save the picture, the default is True.
+    ---------
+    """
+    file_result = pd.read_table(file,encoding="gbk")
+    name = pd.unique(file_result["Trait"])
+    
+    def run(trait_name):
+        file_txt = file_result[file_result["Trait"] == trait_name]
+        file_txt = file_txt.dropna(subset=["p"], axis=0)
+        dd = np.array([0,50])
+        bb = np.array([0,50])
+        fig, axis = plt.subplots(1, 1,figsize=(9,6))
+        group_x = -np.log10(np.arange(1, 
+                                      file_txt.shape[0] + 1) / file_txt.shape[0])
+        group_y = -np.log10(np.sort(file_txt["p"]))
+        if cl_line == None:
+            axis.plot(dd, bb, c="#FE817D", linewidth=2)
+        else:
+            axis.plot(dd, bb, c=cl_line, linewidth=2)
+        if cl_marker == None:
+            axis.scatter(group_x, group_y, c="#81B8E9", s=60)
+        else:
+            axis.scatter(group_x, group_y, c=cl_marker, s=60)  
+        axis.grid(linestyle=":", color="#ADD8E6", alpha=0.8)  
+        axis.tick_params(labelsize=17)
+        axis.set_title(trait_name, fontsize=25, pad=10, 
+                       bbox=dict(facecolor="#B5B5B5", edgecolor="#B5B5B5", alpha=0.5))
+        re_x = group_y[0]
+        axis.set_ylim(0, re_x+0.75)
+        axis.set_xlim(0, re_x+0.75)
+        if save == True:
+            fig.savefig("%s/%s_qq.pdf" % (file_out, trait_name), 
+                        format="pdf",dpi=120)
+            fig.savefig("%s/%s_qq.png" % (file_out, trait_name), 
+                        format="png",dpi=200)
+        return [fig, axis]
+    mapping_result = [] 
+    for i in name:
+        fin = run(i)
+        mapping_result.append(fin)
+        
+
+#Screening for significant sites
+def filtrate(file, out_file=None, threshold=None, save=True):
+    """
+    Significant loci were screened
+    """
+    file_1 = pd.read_table(file, encoding="gbk")
+    name = pd.unique(file_1["Trait"])
+    l = file_1[file_1["Trait"] == name[0]]
+    if threshold == None:
+        yuzhi = 1/len(l)
+    else:
+        yuzhi = threshold
+    five = file_1[file_1["p"]<=yuzhi]
+    if save:
+        five.to_csv(out_file, index=False, sep="\t")
+    return five
+
+
+# Functional annotation of significant sites was performed
+def anno(file_sig, file_anno, file_out, load):
+    def re_fun1(x):
+        return re.search("(?<=ID=).*?(?=;)", x).group()
+    def re_fun2(x):
+        return re.search("(?<=Note=).*", x).group()
+    file = pd.read_table(file_sig)
+    gff = pd.read_table(file_anno, header=None)
+    gff = gff[gff[2] == "gene"]
+    trait = pd.unique(file["Trait"])
+    data_all = pd.DataFrame()
+    for i in trait:
+        target = file[file["Trait"] == i]
+        data = pd.DataFrame()
+        for j,k in target.iterrows():
+            forward = list(k)[3] - load
+            bottom = list(k)[3] + load
+            chr_g = "Chr"+str(int(k["Chr"]))
+            gff_tar = gff[gff[0] == chr_g]
+            gff_tar = gff_tar[gff_tar[4] > forward]
+            gff_tar = gff_tar[gff_tar[3] < bottom]   
+            gff_tar["Chr"] = k["Chr"]
+            gff_tar["gene"] = gff_tar[8].map(re_fun1)
+            gff_tar["des"] = gff_tar[8].map(re_fun2)
+            gff_tar["Marker"] = k["Marker"]
+            gff_tar["Pos"] = k["Pos"]
+            gff_tar["p"] = k ["p"]
+            gff_tar["MarkerR2"] = k["MarkerR2"] 
+            data = pd.concat([data, gff_tar])
+        data["trait"] = i
+        data_all = pd.concat([data_all, data])
+    return data_all
+    data_all.to_csv(file_out, index=None, sep="\t") 
+    
+    
+# Counting the genomic inflation factor.
+def gif(file, file_out=None):
+    file_result = pd.read_table(file,encoding="gbk")
+    file_result = file_result.dropna(subset=["p"])
+    file_result = file_result[file_result["p"]!=0]
+    name = pd.unique(file_result["Trait"])
+    gif_list = []
+    name_list = []
+    for j in name:
+        l = file_result[file_result["Trait"] == j]
+        pvalue = l["p"]
+        len_p = len(l)
+        es = np.array(range(1, len_p+1)) / (len_p + 2)
+        x = np.mat(-np.log10(es))
+        y = np.mat(-np.log10(np.sort(pvalue)))
+        gif =(x*y.T)/(x*x.T)
+        gif = float(gif)
+        gif_list.append(gif)
+        name_list.append(j)
+        if file_out != None:
+            l["p_gif"] = l["p"] / gif
+            l.to_csv(file_out, model="a")
+    file_fin = pd.DataFrame(data={"Trait":name_list, "gif":gif_list})
+    return file_fin 
